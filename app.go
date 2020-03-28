@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -56,10 +57,6 @@ const caddyAddTemplate = `{
 
 var dnsServer = "10.89.0.1"
 
-//func writeFile(data string, path string) error {
-//	return ioutil.WriteFile(path, []byte(data), 0644)
-//}
-
 // use container dns server for service lookup
 func lookupDNS(server string, url string) string {
 	r := &net.Resolver{
@@ -95,7 +92,7 @@ func httpRequest(method string, url string, buffer bytes.Buffer) string {
 }
 
 // convert byte to json
-func readJson(buffer []byte) map[string]interface{} {
+func readJsonMap(buffer []byte) map[string]interface{} {
 	var result map[string]interface{}
 	check(json.Unmarshal(buffer, &result))
 
@@ -111,7 +108,7 @@ func openJson(filename string) map[string]interface{} {
 
 	byteValue, _ := ioutil.ReadAll(jsonFile)
 
-	return readJson(byteValue)
+	return readJsonMap(byteValue)
 }
 
 // get stdin config for annotations & bundle path
@@ -120,31 +117,43 @@ func getStdin() map[string]interface{} {
 	scanner.Scan()
 	check(scanner.Err())
 
-	return readJson(scanner.Bytes())
+	return readJsonMap(scanner.Bytes())
 }
 
 // PUBLIC_NAME:INTERN_NAME:INTERN_PORT
 // create reverseConfig object and fill in data from annotations
+// all needed for poststop hook, no config file available for getting hostname
 // TODO: get exposed port from image
-func checkAnnotations(annotations []string, configJson map[string]interface{}) reverseConfig {
+func getAnnotations(stdin map[string]interface{}, configJson map[string]interface{}, all bool) reverseConfig {
+	annotations := strings.Split(stdin["annotations"].(map[string]interface{})["reverse-proxy"].(string), ":")
+	if len(annotations) == 0 {
+		os.Exit(0)
+	} else if len(annotations) != 3 {
+		log.Fatal("Please provide 3 input values separated by ':' - PUBLIC_NAME:INTERN_NAME:INTERN_PORT - INTERN_NAME is not mandatory")
+	}
+
 	var reverseConfig reverseConfig
 
 	reverseConfig.Url = annotations[0]
-	if annotations[1] == "" {
-		reverseConfig.Dns = configJson["hostname"].(string)
-	} else {
-		reverseConfig.Dns = annotations[1]
+	if all {
+		if annotations[1] == "" {
+			reverseConfig.Dns = configJson["hostname"].(string)
+		} else {
+			reverseConfig.Dns = annotations[1]
+		}
 	}
+
 	reverseConfig.Port = annotations[2]
 
 	return reverseConfig
 }
 
 // returns number of current containers route (filtert based on hostname)
-func getRoute(config map[string]interface{}, hostname string) string {
-	for id, element := range config["route"].([]interface{}) {
-		if element.(map[string]interface{})["match"].([]interface{})[0].(map[string]interface{})["host"] == hostname {
-			return string(id)
+func getCaddyRoute(config map[string]interface{}, hostname string) string {
+	for id, element := range config["routes"].([]interface{}) {
+		// fuck json in go!
+		if element.(map[string]interface{})["match"].([]interface{})[0].(map[string]interface{})["host"].([]interface{})[0] == hostname {
+			return strconv.Itoa(id)
 		}
 	}
 	log.Fatal("No route for this host found.")
@@ -153,19 +162,10 @@ func getRoute(config map[string]interface{}, hostname string) string {
 
 // adds route for new container based on the annotation 'reverse-proxy'
 // TODO: use namespaces
-func addRoute(stdin map[string]interface{}, containerConfig map[string]interface{}) {
-	annotations := strings.Split(stdin["annotations"].(map[string]interface{})["reverse-proxy"].(string), ":")
-	if len(annotations) == 0 {
-		os.Exit(0)
-	} else if len(annotations) != 3 {
-		log.Fatal("Please provide 3 input values separated by ':' - PUBLIC_NAME:INTERN_NAME:INTERN_PORT - INTERN_NAME is not mandatory")
-	}
-
-	reverseConfig := checkAnnotations(annotations, containerConfig)
-
+func addRoute(config reverseConfig) {
 	t := template.Must(template.New("caddy-reverse").Parse(caddyAddTemplate))
 	var tpl bytes.Buffer
-	check(t.Execute(&tpl, reverseConfig))
+	check(t.Execute(&tpl, config))
 
 	httpRequest("PUT", "http://"+lookupDNS(dnsServer, "caddy")+":2019/config/apps/http/servers/srv0/routes/0/", tpl)
 }
@@ -179,16 +179,17 @@ func main() {
 		os.Exit(0)
 	}
 
-	// read container config file
-	containerConfig := openJson(stdin["bundle"].(string) + "/config.json")
-
 	// check whether route should be added or deleted
 	if os.Args[1] == "add" {
-		addRoute(stdin, containerConfig)
+		// read container config file
+		containerConfig := openJson(stdin["bundle"].(string) + "/config.json")
+		reverseConfig := getAnnotations(stdin, containerConfig, true)
+		addRoute(reverseConfig)
 	} else if os.Args[1] == "delete" {
+		reverseConfig := getAnnotations(stdin, nil, false)
 		// get current caddy routes
-		caddyConf := httpRequest("GET", "http://"+lookupDNS(dnsServer, "caddy")+":2019/config/apps/http/servers/srv0", bytes.Buffer{})
-		routeNumber := getRoute(readJson([]byte(caddyConf)), containerConfig["hostname"].(string))
+		caddyConf := httpRequest("GET", "http://"+lookupDNS(dnsServer, "caddy")+":2019/config/apps/http/servers/srv0/", bytes.Buffer{})
+		routeNumber := getCaddyRoute(readJsonMap([]byte(caddyConf)), reverseConfig.Url)
 		// delete container route
 		httpRequest("DELETE", "http://"+lookupDNS(dnsServer, "caddy")+":2019/config/apps/http/servers/srv0/routes/"+routeNumber, bytes.Buffer{})
 	} else {
