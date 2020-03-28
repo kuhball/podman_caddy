@@ -3,16 +3,16 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"github.com/varlink/go/varlink"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
 	"text/template"
+	"time"
 )
 
 func check(e error) {
@@ -22,105 +22,109 @@ func check(e error) {
 }
 
 type reverseConfig struct {
-	Dns, Port, Url  string
+	Dns, Port, Url string
 }
 
-
-const caddyTemplate = `{
-  "apps": {
-    "http": {
-      "servers": {
-        "srv0": {
-          "routes": [
+const caddyAddTemplate = `{
+  "handle": [
+    {
+      "handler": "subroute",
+      "routes": [
+        {
+          "handle": [
             {
-              "handle": [
+              "handler": "reverse_proxy",
+              "upstreams": [
                 {
-                  "handler": "subroute",
-                  "routes": [
-                    {
-                      "handle": [
-                        {
-                          "handler": "reverse_proxy",
-                          "upstreams": [
-                            {
-                              "dial": "{{ .Dns }}:{{ .Port }}"
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ],
-              "match": [
-                {
-                  "host": [
-                    "{{ .Url }}"
-                  ]
+                  "dial": "{{ .Dns }}:{{ .Port }}"
                 }
               ]
             }
           ]
         }
-      }
+      ]
     }
-  }
+  ],
+  "match": [
+    {
+      "host": [
+        "{{ .Url }}"
+      ]
+    }
+  ]
 }`
 
+var dnsServer = "10.89.0.1"
 
-func writeFile(data string, path string) error {
-	return ioutil.WriteFile(path, []byte(data), 0644)
+//func writeFile(data string, path string) error {
+//	return ioutil.WriteFile(path, []byte(data), 0644)
+//}
+
+// use container dns server for service lookup
+func lookupDNS(server string, url string) string {
+	r := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{
+				Timeout: time.Millisecond * time.Duration(10000),
+			}
+			return d.DialContext(ctx, "udp", server+":53")
+		},
+	}
+	ip, _ := r.LookupHost(context.Background(), url)
+
+	return ip[0]
 }
 
-func openConfig(filename string) map[string]interface{} {
-	jsonFile, err := os.Open(filename)
+func httpRequest(method string, url string, buffer bytes.Buffer) string {
+	client := &http.Client{}
 
+	req, err := http.NewRequest(method, url, &buffer)
+	check(err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 	check(err)
 
-	fmt.Println("Successfully opened file.")
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	check(err)
+
+	return string(body)
+}
+
+// convert byte to json
+func readJson(buffer []byte) map[string]interface{} {
+	var result map[string]interface{}
+	check(json.Unmarshal(buffer, &result))
+
+	return result
+}
+
+// open json config file
+func openJson(filename string) map[string]interface{} {
+	jsonFile, err := os.Open(filename)
+	check(err)
 
 	defer jsonFile.Close()
 
 	byteValue, _ := ioutil.ReadAll(jsonFile)
 
-	var result map[string]interface{}
-	check(json.Unmarshal(byteValue, &result))
-
-	return result
+	return readJson(byteValue)
 }
 
+// get stdin config for annotations & bundle path
 func getStdin() map[string]interface{} {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
 	check(scanner.Err())
 
-	var result map[string]interface{}
-	check(json.Unmarshal(scanner.Bytes(), &result))
-
-	return result
-}
-
-func getIP(hostname string, path string) (string, error) {
-	files, err := ioutil.ReadDir(path)
-	check(err)
-
-	for _, file := range files {
-		if !file.IsDir() {
-			dat, err := ioutil.ReadFile(path + file.Name())
-			check(err)
-
-			fmt.Println(string(dat))
-
-			if string(dat[0:12]) == hostname || string(dat[:64]) == hostname {
-				return file.Name(), nil
-			}
-		}
-	}
-
-	return "", errors.New("no IP Address found")
+	return readJson(scanner.Bytes())
 }
 
 // PUBLIC_NAME:INTERN_NAME:INTERN_PORT
+// create reverseConfig object and fill in data from annotations
 // TODO: get exposed port from image
 func checkAnnotations(annotations []string, configJson map[string]interface{}) reverseConfig {
 	var reverseConfig reverseConfig
@@ -136,35 +140,60 @@ func checkAnnotations(annotations []string, configJson map[string]interface{}) r
 	return reverseConfig
 }
 
-var c *varlink.Connection
-var err error
+// returns number of current containers route (filtert based on hostname)
+func getRoute(config map[string]interface{}, hostname string) string {
+	for id, element := range config["route"].([]interface{}) {
+		if element.(map[string]interface{})["match"].([]interface{})[0].(map[string]interface{})["host"] == hostname {
+			return string(id)
+		}
+	}
+	log.Fatal("No route for this host found.")
+	return ""
+}
 
-func main() {
-	stdin := getStdin()
-
+// adds route for new container based on the annotation 'reverse-proxy'
+// TODO: use namespaces
+func addRoute(stdin map[string]interface{}, containerConfig map[string]interface{}) {
 	annotations := strings.Split(stdin["annotations"].(map[string]interface{})["reverse-proxy"].(string), ":")
-	fmt.Println(len(annotations))
 	if len(annotations) == 0 {
-		os.Exit(1)
+		os.Exit(0)
 	} else if len(annotations) != 3 {
-		log.Fatal("Please provide 3 input values separated by ':' - PUBLIC_NAME:INTERN_NAME:INTERN_PORT - INTERN_NAME is not necessary")
+		log.Fatal("Please provide 3 input values separated by ':' - PUBLIC_NAME:INTERN_NAME:INTERN_PORT - INTERN_NAME is not mandatory")
 	}
 
-	configJson := openConfig(stdin["bundle"].(string) + "/config.json")
+	reverseConfig := checkAnnotations(annotations, containerConfig)
 
-	reverseConfig := checkAnnotations(annotations, configJson)
-
-	t := template.Must(template.New("caddy-reverse").Parse(caddyTemplate))
+	t := template.Must(template.New("caddy-reverse").Parse(caddyAddTemplate))
 	var tpl bytes.Buffer
-	check(t.Execute(&tpl,reverseConfig))
+	check(t.Execute(&tpl, reverseConfig))
 
-	resp, err := http.Post("","application/json", &tpl)
-	check(err)
+	httpRequest("PUT", "http://"+lookupDNS(dnsServer, "caddy")+":2019/config/apps/http/servers/srv0/routes/0/", tpl)
+}
 
-	defer resp.Body.Close()
+func main() {
+	// get stdin config for container
+	stdin := getStdin()
 
-	body, err := ioutil.ReadAll(resp.Body)
-	check(err)
+	// exits if no annotations are provided
+	if stdin["annotations"].(map[string]interface{})["reverse-proxy"] == nil {
+		os.Exit(0)
+	}
 
-	writeFile("/root/response_body", string(body))
+	// read container config file
+	containerConfig := openJson(stdin["bundle"].(string) + "/config.json")
+
+	// check whether route should be added or deleted
+	if os.Args[1] == "add" {
+		addRoute(stdin, containerConfig)
+	} else if os.Args[1] == "delete" {
+		// get current caddy routes
+		caddyConf := httpRequest("GET", "http://"+lookupDNS(dnsServer, "caddy")+":2019/config/apps/http/servers/srv0", bytes.Buffer{})
+		routeNumber := getRoute(readJson([]byte(caddyConf)), containerConfig["hostname"].(string))
+		// delete container route
+		httpRequest("DELETE", "http://"+lookupDNS(dnsServer, "caddy")+":2019/config/apps/http/servers/srv0/routes/"+routeNumber, bytes.Buffer{})
+	} else {
+		log.Fatal("please use argument 'add' or 'delete'")
+	}
+
+	return
 }
