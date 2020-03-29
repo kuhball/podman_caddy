@@ -3,17 +3,15 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
+	"flag"
 	"io/ioutil"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"text/template"
-	"time"
 )
 
 func check(e error) {
@@ -55,23 +53,23 @@ const caddyAddTemplate = `{
   ]
 }`
 
-var dnsServer = "10.89.0.1"
-
-// use container dns server for service lookup
-func lookupDNS(server string, url string) string {
-	r := &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := net.Dialer{
-				Timeout: time.Millisecond * time.Duration(10000),
-			}
-			return d.DialContext(ctx, "udp", server+":53")
-		},
-	}
-	ip, _ := r.LookupHost(context.Background(), url)
-
-	return ip[0]
-}
+//var dnsServer = "10.89.0.1"
+//
+//// use container dns server for service lookup
+//func lookupDNS(server string, url string) string {
+//	r := &net.Resolver{
+//		PreferGo: true,
+//		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+//			d := net.Dialer{
+//				Timeout: time.Millisecond * time.Duration(10000),
+//			}
+//			return d.DialContext(ctx, "udp", server+":53")
+//		},
+//	}
+//	ip, _ := r.LookupHost(context.Background(), url)
+//
+//	return ip[0]
+//}
 
 func httpRequest(method string, url string, buffer bytes.Buffer) string {
 	client := &http.Client{}
@@ -125,7 +123,7 @@ func getStdin() map[string]interface{} {
 // all needed for poststop hook, no config file available for getting hostname
 // TODO: get exposed port from image
 func getAnnotations(stdin map[string]interface{}, configJson map[string]interface{}, all bool) reverseConfig {
-	annotations := strings.Split(stdin["annotations"].(map[string]interface{})["reverse-proxy"].(string), ":")
+	annotations := strings.Split(stdin["annotations"].(map[string]interface{})["de.gaengeviertel.reverse-proxy"].(string), ":")
 	if len(annotations) == 0 {
 		os.Exit(0)
 	} else if len(annotations) != 3 {
@@ -161,37 +159,51 @@ func getCaddyRoute(config map[string]interface{}, hostname string) string {
 }
 
 // adds route for new container based on the annotation 'reverse-proxy'
-// TODO: use namespaces
-func addRoute(config reverseConfig) {
+// TODO: if port 80 is used, exclude from https cert
+func addRoute(config reverseConfig) bytes.Buffer {
 	t := template.Must(template.New("caddy-reverse").Parse(caddyAddTemplate))
 	var tpl bytes.Buffer
 	check(t.Execute(&tpl, config))
 
-	httpRequest("PUT", "http://"+lookupDNS(dnsServer, "caddy")+":2019/config/apps/http/servers/srv0/routes/0/", tpl)
+	return tpl
 }
 
 func main() {
+	mode := flag.String("mode", "add", "adding or deleting a route in caddy")
+	caddyHost := flag.String("name", "caddy", "hostname or ip of the caddy container")
+	useConfig := flag.Bool("use-config", false, "if true config.json will be used for getting internal hostname")
+
+	flag.Parse()
+
 	// get stdin config for container
 	stdin := getStdin()
 
 	// exits if no annotations are provided
-	if stdin["annotations"].(map[string]interface{})["reverse-proxy"] == nil {
+	if stdin["annotations"].(map[string]interface{})["de.gaengeviertel.reverse-proxy"] == nil {
 		os.Exit(0)
 	}
 
 	// check whether route should be added or deleted
-	if os.Args[1] == "add" {
-		// read container config file
-		containerConfig := openJson(stdin["bundle"].(string) + "/config.json")
-		reverseConfig := getAnnotations(stdin, containerConfig, true)
-		addRoute(reverseConfig)
-	} else if os.Args[1] == "delete" {
+	if *mode == "add" {
+		var reverseConfig reverseConfig
+		if *useConfig {
+			// read container config file
+			containerConfig := openJson(stdin["bundle"].(string) + "/config.json")
+			reverseConfig = getAnnotations(stdin, containerConfig, true)
+		} else {
+			// read container config file
+			reverseConfig = getAnnotations(stdin, nil, false)
+		}
+		tpl := addRoute(reverseConfig)
+
+		httpRequest("PUT", "http://"+*caddyHost+":2019/config/apps/http/servers/srv0/routes/0/", tpl)
+	} else if *mode == "delete" {
 		reverseConfig := getAnnotations(stdin, nil, false)
 		// get current caddy routes
-		caddyConf := httpRequest("GET", "http://"+lookupDNS(dnsServer, "caddy")+":2019/config/apps/http/servers/srv0/", bytes.Buffer{})
+		caddyConf := httpRequest("GET", "http://"+*caddyHost+":2019/config/apps/http/servers/srv0/", bytes.Buffer{})
 		routeNumber := getCaddyRoute(readJsonMap([]byte(caddyConf)), reverseConfig.Url)
 		// delete container route
-		httpRequest("DELETE", "http://"+lookupDNS(dnsServer, "caddy")+":2019/config/apps/http/servers/srv0/routes/"+routeNumber, bytes.Buffer{})
+		httpRequest("DELETE", "http://"+*caddyHost+":2019/config/apps/http/servers/srv0/routes/"+routeNumber, bytes.Buffer{})
 	} else {
 		log.Fatal("please use argument 'add' or 'delete'")
 	}
