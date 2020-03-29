@@ -133,12 +133,11 @@ func getAnnotations(stdin map[string]interface{}, configJson map[string]interfac
 	var reverseConfig reverseConfig
 
 	reverseConfig.Url = annotations[0]
-	if all {
-		if annotations[1] == "" {
-			reverseConfig.Dns = configJson["hostname"].(string)
-		} else {
-			reverseConfig.Dns = annotations[1]
-		}
+
+	if all && annotations[1] == "" {
+		reverseConfig.Dns = configJson["hostname"].(string)
+	} else {
+		reverseConfig.Dns = annotations[1]
 	}
 
 	reverseConfig.Port = annotations[2]
