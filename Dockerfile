@@ -4,6 +4,9 @@ FROM golang:alpine as build-env
 COPY ./ /go/src/github.com/scouball/podman_caddy
 WORKDIR /go/src/github.com/scouball/podman_caddy
 
+RUN apk add git
+RUN go get gopkg.in/urfave/cli.v2
+
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -ldflags="-w -s" -o $GOPATH/bin/podman_caddy
 
 

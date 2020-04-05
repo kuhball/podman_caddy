@@ -16,7 +16,7 @@ You need 2 hooks. These are placed in `/etc/containers/oci/hooks.d/` or `/usr/sh
   "version": "1.0.0",
   "hook": {
     "path": "PathToBinary",
-    "args": ["podman_caddy", "-mode=add"]
+    "args": ["podman_caddy", "add"]
   },
   "when": {
     "annotations": {
@@ -32,7 +32,7 @@ You need 2 hooks. These are placed in `/etc/containers/oci/hooks.d/` or `/usr/sh
   "version": "1.0.0",
   "hook": {
     "path": "PathToBinary",
-    "args": ["podman_caddy", "-mode=delete"]
+    "args": ["podman_caddy", "rm "]
   },
   "when": {
     "annotations": {
@@ -50,7 +50,7 @@ You need 2 hooks. These are placed in `/etc/containers/oci/hooks.d/` or `/usr/sh
   "version": "1.0.0",
   "hook": {
     "path": "/bin/podman",
-    "args": ["podman", "run", "--rm", "-i", "-a", "stdin","--network", "dns_test", "podman_caddy", "-mode=add"]
+    "args": ["podman", "run", "--rm", "-i", "-a", "stdin","--network", "dns_test", "podman_caddy", "add"]
   },
   "when": {
     "annotations": {
@@ -66,7 +66,7 @@ You need 2 hooks. These are placed in `/etc/containers/oci/hooks.d/` or `/usr/sh
   "version": "1.0.0",
   "hook": {
     "path": "/usr/local/bin/wrapper.sh",
-    "args": ["wrapper.sh", "podman", "run", "--rm", "-i", "-a", "stdin","--network", "dns_test", "podman_caddy", "-mode=delete"]
+    "args": ["wrapper.sh", "podman", "run", "--rm", "-i", "-a", "stdin","--network", "dns_test", "podman_caddy", "rm"]
   },
   "when": {
     "annotations": {
@@ -85,11 +85,39 @@ Within the provided Dockerfile a build stage is used for building the image. Aft
 
 Following arguments can be provided:
 
-- `mode`: `add` / `delete` , default: `add`
-- `name`: Hostname or IP Address of the caddy container, default:`caddy`
-- `use-config`: bool, if true the config.json from the bundle path is used for optaining the hostname of the created container (only possible if the tool is running on the host system), default: `false`
+```
+# podman run --rm podman_caddy --help
+NAME:
+   podman_caddy - create caddy routes from a podman context
 
+USAGE:
+   podman_caddy [global options] command [command options] [arguments...]
 
+COMMANDS:
+   add, a      add a route to caddy
+   remove, rm  delete a route from caddy
+   ls, ls      displays current caddy config
+   help, h     Shows a list of commands or help for one command
+
+GLOBAL OPTIONS:
+   --help, -h  show help (default: false)
+```
+
+For every command there are several options like:
+
+```
+# podman run --rm podman_caddy add --help
+NAME:
+   podman_caddy add - add a route to caddy
+
+USAGE:
+   podman_caddy add [command options] [arguments...]
+
+OPTIONS:
+   --caddyHost value, --ca value  Provide the caddy hostname or IP manually (default: caddy) [$PODMAN_CADDY_HOST]
+   --forward value, --fw value    Provide route details in the format PUBLIC_NAME:INTERN_NAME:INTERN_PORT [$PODMAN_CADDY_FORWARD]
+   --help, -h                     show help (default: false)
+```
 
 ### tool in a container
 
@@ -150,4 +178,3 @@ It's important to make sure the first container started in the environment is th
 ```bash
 podman run -it --rm --name dieter --hostname dieter --network dns_test --annotation de.gaengeviertel.reverse-proxy=dieter:dieter:80 log-level debug  alpine_nginx
 ```
-
