@@ -10,9 +10,9 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"text/template"
+	"time"
 )
 
 func check(e error) {
@@ -26,6 +26,7 @@ type reverseConfig struct {
 }
 
 const caddyAddTemplate = `{
+  "@id": "{{ .Url }}",
   "handle": [
     {
       "handler": "subroute",
@@ -80,7 +81,14 @@ func httpRequest(method string, url string, buffer bytes.Buffer) string {
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
-	check(err)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such host") {
+			log.Println("unable to complete DNS request for provided caddy host.")
+			return "dnsError"
+		} else {
+			panic(err)
+		}
+	}
 
 	defer resp.Body.Close()
 
@@ -138,20 +146,8 @@ func createReverseConfig(input []string) reverseConfig {
 	return reverseConfig
 }
 
-// returns number of current containers route (filtert based on hostname)
-func getCaddyRoute(config map[string]interface{}, hostname string) string {
-	for id, element := range config["routes"].([]interface{}) {
-		// fuck json in go!
-		if element.(map[string]interface{})["match"].([]interface{})[0].(map[string]interface{})["host"].([]interface{})[0] == hostname {
-			return strconv.Itoa(id)
-		}
-	}
-	log.Fatal("No route for this host found.")
-	return ""
-}
-
 // adds route for new container based on the annotation 'reverse-proxy'
-func addRoute(config reverseConfig) bytes.Buffer {
+func createTemplate(config reverseConfig) bytes.Buffer {
 	t := template.Must(template.New("caddy-reverse").Parse(caddyAddTemplate))
 	var tpl bytes.Buffer
 	check(t.Execute(&tpl, config))
@@ -166,11 +162,26 @@ func checkFlags(forward string) reverseConfig {
 	} else {
 		return getManualConfig(forward)
 	}
+}
 
+func addRoute(reverseConfig reverseConfig, caddyHost string) {
+	resp := httpRequest("GET", "http://"+caddyHost+":2019/id/"+reverseConfig.Url, bytes.Buffer{})
+
+	// check whether object with id already exists, if true abort
+	if strings.Contains(resp, "dnsError") {
+		log.Println("Host unavailable")
+	} else if strings.Contains(resp, `"error":"unknown object ID`) {
+		tpl := createTemplate(reverseConfig)
+		httpRequest("PUT", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/routes/0/", tpl)
+		log.Println("Added route successfully.")
+	} else {
+		log.Println("Route already exists.")
+	}
 }
 
 func main() {
 	var caddyHost, forward string
+	var update int
 	app := &cli.App{
 		Name:  "podman_caddy",
 		Usage: "create caddy routes from a podman context",
@@ -196,12 +207,25 @@ func main() {
 						EnvVars:     []string{"PODMAN_CADDY_FORWARD"},
 						Destination: &forward,
 					},
+					&cli.IntFlag{
+						Name:        "update",
+						Aliases:     []string{"up"},
+						Usage:       "retries to add the route every n mins in case of unavailable caddy server",
+						Value:       0,
+						Destination: &update,
+					},
 				},
 				Action: func(c *cli.Context) error {
 					reverseConfig := checkFlags(forward)
-					tpl := addRoute(reverseConfig)
+					addRoute(reverseConfig, caddyHost)
 
-					httpRequest("PUT", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/routes/0/", tpl)
+					// retries route creation every n minutes
+					if update != 0 {
+						for {
+							time.Sleep(time.Duration(update) * time.Minute)
+							addRoute(reverseConfig, caddyHost)
+						}
+					}
 					return nil
 				},
 			},
@@ -230,11 +254,7 @@ func main() {
 				Action: func(c *cli.Context) error {
 					reverseConfig := checkFlags(forward)
 
-					// get current caddy routes
-					caddyConf := httpRequest("GET", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/", bytes.Buffer{})
-					routeNumber := getCaddyRoute(readJsonMap([]byte(caddyConf)), reverseConfig.Url)
-					// delete container route
-					httpRequest("DELETE", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/routes/"+routeNumber, bytes.Buffer{})
+					httpRequest("DELETE", "http://"+caddyHost+":2019/id/"+reverseConfig.Url, bytes.Buffer{})
 					return nil
 				},
 			},

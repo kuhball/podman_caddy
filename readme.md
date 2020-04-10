@@ -116,6 +116,7 @@ USAGE:
 OPTIONS:
    --caddyHost value, --ca value  Provide the caddy hostname or IP manually (default: caddy) [$PODMAN_CADDY_HOST]
    --forward value, --fw value    Provide route details in the format PUBLIC_NAME:INTERN_NAME:INTERN_PORT [$PODMAN_CADDY_FORWARD]
+   --update value, --up value     retries to add the route every n mins in case of unavailable caddy server (default: 0)
    --help, -h                     show help (default: false)
 ```
 
