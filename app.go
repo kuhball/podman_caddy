@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -164,6 +165,18 @@ func checkFlags(forward string) reverseConfig {
 	}
 }
 
+// returns number of current containers route (filtert based on hostname)
+func getCaddyRoute(config map[string]interface{}, hostname string) string {
+	for id, element := range config["routes"].([]interface{})[:len(config["routes"].([]interface{}))-1] {
+		// fuck json in go!
+		if element.(map[string]interface{})["match"].([]interface{})[0].(map[string]interface{})["host"].([]interface{})[0] == hostname {
+			return strconv.Itoa(id)
+		}
+	}
+	log.Fatal("No route for this host found.")
+	return ""
+}
+
 func addRoute(reverseConfig reverseConfig, caddyHost string) {
 	resp := httpRequest("GET", "http://"+caddyHost+":2019/id/"+reverseConfig.Url, bytes.Buffer{})
 
@@ -179,8 +192,20 @@ func addRoute(reverseConfig reverseConfig, caddyHost string) {
 	}
 }
 
+func delRoute(caddyHost string, domain string) {
+	log.Println("Deleting route with id " + domain)
+	resp := httpRequest("DELETE", "http://"+caddyHost+":2019/id/"+domain, bytes.Buffer{})
+
+	if strings.Contains(resp, `"error":"unknown object ID`) {
+		log.Println("No route with matching ID found, searching for route.")
+		caddyConf := httpRequest("GET", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/", bytes.Buffer{})
+		routeNumber := getCaddyRoute(readJsonMap([]byte(caddyConf)), domain)
+		httpRequest("DELETE", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/routes/"+routeNumber, bytes.Buffer{})
+	}
+}
+
 func main() {
-	var caddyHost, forward string
+	var caddyHost, forward, extern string
 	var update int
 	app := &cli.App{
 		Name:  "podman_caddy",
@@ -250,11 +275,21 @@ func main() {
 						EnvVars:     []string{"PODMAN_CADDY_FORWARD"},
 						Destination: &forward,
 					},
+					&cli.StringFlag{
+						Name:        "extern",
+						Aliases:     []string{"ex"},
+						Usage:       "External domainname used in the route which should be deleted",
+						Destination: &extern,
+					},
 				},
 				Action: func(c *cli.Context) error {
-					reverseConfig := checkFlags(forward)
+					if extern != "" {
+						delRoute(caddyHost, extern)
+					} else {
+						reverseConfig := checkFlags(forward)
+						delRoute(caddyHost, reverseConfig.Url)
+					}
 
-					httpRequest("DELETE", "http://"+caddyHost+":2019/id/"+reverseConfig.Url, bytes.Buffer{})
 					return nil
 				},
 			},
