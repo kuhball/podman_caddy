@@ -87,20 +87,21 @@ Following arguments can be provided:
 
 ```
 # podman run --rm podman_caddy --help
-NAME:
-   podman_caddy - create caddy routes from a podman context
-
-USAGE:
-   podman_caddy [global options] command [command options] [arguments...]
-
-COMMANDS:
-   add, a      add a route to caddy
-   remove, rm  delete a route from caddy
-   ls, ls      displays current caddy config
-   help, h     Shows a list of commands or help for one command
-
-GLOBAL OPTIONS:
-   --help, -h  show help (default: false)
+  NAME:
+     podman_caddy - create caddy routes from a podman context
+  
+  USAGE:
+     podman_caddy [global options] command [command options] [arguments...]
+  
+  COMMANDS:
+     add, a      add a route to caddy
+     remove, rm  delete a route from caddy
+     ls, ls      displays current caddy config
+     redir, mv   creates 301 and redirects to provided page
+     help, h     Shows a list of commands or help for one command
+  
+  GLOBAL OPTIONS:
+     --help, -h  show help (default: false)
 ```
 
 For every command there are several options like:

@@ -26,6 +26,10 @@ type reverseConfig struct {
 	Dns, Port, Url string
 }
 
+type redirConfig struct {
+	Origin, Redirect string
+}
+
 const caddyAddTemplate = `{
   "@id": "{{ .Url }}",
   "handle": [
@@ -73,6 +77,37 @@ const caddyAddTemplate = `{
     }
   ]
 }`
+
+const CaddyRedirTemplate = `{
+	"@id": "{{ .Origin }}",
+	"handle": [
+                {
+                  "handler": "subroute",
+                  "routes": [
+                    {
+                      "handle": [
+                        {
+                          "handler": "static_response",
+                          "headers": {
+                            "Location": [
+                              "{{ .Redirect }}{http.request.uri}"
+                            ]
+                          },
+                          "status_code": 302
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "{{ .Origin }}"
+                  ]
+                }
+              ]}
+`
 
 func httpRequest(method string, url string, buffer bytes.Buffer) string {
 	client := &http.Client{}
@@ -148,8 +183,17 @@ func createReverseConfig(input []string) reverseConfig {
 }
 
 // adds route for new container based on the annotation 'reverse-proxy'
-func createTemplate(config reverseConfig) bytes.Buffer {
+func createProxyTemplate(config reverseConfig) bytes.Buffer {
 	t := template.Must(template.New("caddy-reverse").Parse(caddyAddTemplate))
+	var tpl bytes.Buffer
+	check(t.Execute(&tpl, config))
+
+	return tpl
+}
+
+// adds route for new container based on the annotation 'reverse-proxy'
+func createRedirTemplate(config redirConfig) bytes.Buffer {
+	t := template.Must(template.New("caddy-reverse").Parse(CaddyRedirTemplate))
 	var tpl bytes.Buffer
 	check(t.Execute(&tpl, config))
 
@@ -184,7 +228,7 @@ func addRoute(reverseConfig reverseConfig, caddyHost string) {
 	if strings.Contains(resp, "dnsError") {
 		log.Println("Host unavailable")
 	} else if strings.Contains(resp, `"error":"unknown object ID`) {
-		tpl := createTemplate(reverseConfig)
+		tpl := createProxyTemplate(reverseConfig)
 		httpRequest("PUT", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/routes/0/", tpl)
 		log.Println("Added route successfully.")
 	} else {
@@ -204,8 +248,23 @@ func delRoute(caddyHost string, domain string) {
 	}
 }
 
+func addRedir(redirConfig redirConfig, caddyHost string) {
+	resp := httpRequest("GET", "http://"+caddyHost+":2019/id/"+redirConfig.Origin, bytes.Buffer{})
+
+	// check whether object with id already exists, if true abort
+	if strings.Contains(resp, "dnsError") {
+		log.Println("Host unavailable")
+	} else if strings.Contains(resp, `"error":"unknown object ID`) {
+		httpRequest("PUT", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/routes/0/", createRedirTemplate(redirConfig))
+		log.Println("Added route successfully.")
+	} else {
+		log.Println("Route already exists.")
+	}
+}
+
 func main() {
 	var caddyHost, forward, extern string
+	var redir redirConfig
 	var update int
 	app := &cli.App{
 		Name:  "podman_caddy",
@@ -311,6 +370,40 @@ func main() {
 				Action: func(c *cli.Context) error {
 					// get current caddy routes
 					fmt.Println(httpRequest("GET", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/", bytes.Buffer{}))
+					return nil
+				},
+			},
+			{
+				Name:    "redir",
+				Aliases: []string{"mv"},
+				Usage:   "creates 301 and redirects to provided page",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:        "caddyHost",
+						Aliases:     []string{"ca"},
+						Value:       "caddy",
+						Usage:       "Provide the caddy hostname or IP manually",
+						EnvVars:     []string{"PODMAN_CADDY_HOST"},
+						DefaultText: "caddy",
+						Destination: &caddyHost,
+					},
+					&cli.StringFlag{
+						Name:        "origin",
+						Aliases:     []string{"orig"},
+						Usage:       "Provide origin which should be redirected (example: test.example.com)",
+						Destination: &redir.Origin,
+						Required:    true,
+					},
+					&cli.StringFlag{
+						Name:        "redirect",
+						Aliases:     []string{"re"},
+						Usage:       "Provide redirect location (example: example.com)",
+						Destination: &redir.Redirect,
+						Required:    true,
+					},
+				},
+				Action: func(c *cli.Context) error {
+					addRedir(redir, caddyHost)
 					return nil
 				},
 			},
