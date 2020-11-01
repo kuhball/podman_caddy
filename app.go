@@ -39,25 +39,35 @@ const caddyAddTemplate = `{
         {
           "handle": [
             {
+              "handler": "headers",
+              "response": {
+                "set": {
+                  "Strict-Transport-Security": [
+                    "max-age=31536000;"
+                  ]
+                }
+              }
+            },
+            {
               "handler": "reverse_proxy",
               "headers": {
-				"request": {
-				  "set": {
-					"X-Forwarded-Proto": [
-					  "{http.request.scheme}"
-					],
-					"X-Real-Ip": [
-					  "{http.request.remote.host}"
-					],
-					"X-Forwarded-For": [
-					  "{http.request.remote.host}"
-					],
-					"Forwarded": [
-					  "for={http.request.remote.host};host={http.request.hostport};proto={http.request.scheme}"
-					]
-				  }
-				}
-			  },
+                "request": {
+                  "set": {
+                    "X-Forwarded-Proto": [
+                      "{http.request.scheme}"
+                    ],
+                    "X-Real-Ip": [
+                      "{http.request.remote.host}"
+                    ],
+                    "X-Forwarded-For": [
+                      "{http.request.remote.host}"
+                    ],
+                    "Forwarded": [
+                      "for={http.request.remote.host};host={http.request.hostport};proto={http.request.scheme}"
+                    ]
+                  }
+                }
+              },
               "upstreams": [
                 {
                   "dial": "{{ .Dns }}:{{ .Port }}"
