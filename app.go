@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -123,8 +122,8 @@ func httpRequest(method string, url string, buffer bytes.Buffer) string {
 	client := &http.Client{}
 
 	req, err := http.NewRequest(method, url, &buffer)
-	check(err)
 	req.Header.Set("Content-Type", "application/json")
+	check(err)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -138,10 +137,14 @@ func httpRequest(method string, url string, buffer bytes.Buffer) string {
 
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+        body, err := ioutil.ReadAll(resp.Body)
 	check(err)
 
-	return string(body)
+        var prettyJSON bytes.Buffer
+        err = json.Indent(&prettyJSON, body, "", "    ")
+        check(err)
+
+	return string(prettyJSON.Bytes())
 }
 
 // convert byte to json
@@ -150,22 +153,6 @@ func readJsonMap(buffer []byte) map[string]interface{} {
 	check(json.Unmarshal(buffer, &result))
 
 	return result
-}
-
-// get stdin config for annotations & bundle path
-func getStdin() map[string]interface{} {
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
-	check(scanner.Err())
-
-	return readJsonMap(scanner.Bytes())
-}
-
-// get annotation from stdin and split it
-func getStdinConfig(stdin map[string]interface{}) reverseConfig {
-	annotations := strings.Split(stdin["annotations"].(map[string]interface{})["de.gaengeviertel.reverse-proxy"].(string), ":")
-
-	return createReverseConfig(annotations)
 }
 
 // split manual input from flag
@@ -212,11 +199,7 @@ func createRedirTemplate(config redirConfig) bytes.Buffer {
 
 // checks whether forward flag was used for providing manual config data
 func checkFlags(forward string) reverseConfig {
-	if forward == "" {
-		return getStdinConfig(getStdin())
-	} else {
-		return getManualConfig(forward)
-	}
+	return getManualConfig(forward)
 }
 
 // returns number of current containers route (filtert based on hostname)
