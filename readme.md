@@ -1,83 +1,7 @@
 # podman caddy
-This tool creates reverse-proxy entries in [caddy](https://caddyserver.com/). For calling the tool automatically when creating a new container in podman OCI hooks are used.
+This tool creates reverse-proxy entries in [caddy](https://caddyserver.com/). This tool is running within an seperate container in every pod for announcing a caddy route.  
 
 ## install
-
-### hooks 
-
-Adapt the used arguments to your environment. 
-
-#### binary
-
-You need 2 hooks. These are placed in `/etc/containers/oci/hooks.d/` or `/usr/share/containers/oci/hooks.d/`
-
-```
-{
-  "version": "1.0.0",
-  "hook": {
-    "path": "PathToBinary",
-    "args": ["podman_caddy", "add"]
-  },
-  "when": {
-    "annotations": {
-	"de.gaengeviertel.reverse-proxy":".*:.*:.*"
-   }
-  },
-  "stages": ["poststart"]
-}
-```
-
-```
-{
-  "version": "1.0.0",
-  "hook": {
-    "path": "PathToBinary",
-    "args": ["podman_caddy", "rm "]
-  },
-  "when": {
-    "annotations": {
-	"de.gaengeviertel.reverse-proxy":".*:.*:.*"
-   }
-  },
-  "stages": ["poststop"]
-}
-```
-
-#### container
-
-```
-{
-  "version": "1.0.0",
-  "hook": {
-    "path": "/bin/podman",
-    "args": ["podman", "run", "--rm", "-i", "-a", "stdin","--network", "dns_test", "podman_caddy", "add"]
-  },
-  "when": {
-    "annotations": {
-	"de.gaengeviertel.reverse-proxy":".*:.*:.*"
-   }
-  },
-  "stages": ["poststart"]
-}
-```
-
-```
-{
-  "version": "1.0.0",
-  "hook": {
-    "path": "/usr/local/bin/wrapper.sh",
-    "args": ["wrapper.sh", "podman", "run", "--rm", "-i", "-a", "stdin","--network", "dns_test", "podman_caddy", "rm"]
-  },
-  "when": {
-    "annotations": {
-	"de.gaengeviertel.reverse-proxy":".*:.*:.*"
-   }
-  },
-  "stages": ["poststop"]
-}
-```
-
-
 
 ### tool
 
@@ -129,16 +53,6 @@ For building the container use the following command:
 podman build --rm -t podman_caddy:latest .
 ```
 
-Due to a missing PATH in the poststop hook you need a wrapper around the command:
-
-```sh
-#!/bin/sh
-
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
-exec "$@"
-```
-
 ### caddy container
 
 ```bash
@@ -178,5 +92,6 @@ It's important to make sure the first container started in the environment is th
 ## test
 
 ```bash
-podman run -it --rm --name dieter --hostname dieter --network dns_test --annotation de.gaengeviertel.reverse-proxy=dieter:dieter:80 log-level debug  alpine_nginx
+podman run --rm podman_caddy add --fw test.local:dieter:80
+podman run -it --rm --name dieter --hostname dieter --network dns_test alpine_nginx
 ```
