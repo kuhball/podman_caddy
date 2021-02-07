@@ -141,8 +141,7 @@ func httpRequest(method string, url string, buffer bytes.Buffer) string {
 	check(err)
 
         var prettyJSON bytes.Buffer
-        err = json.Indent(&prettyJSON, body, "", "    ")
-        check(err)
+        _ = json.Indent(&prettyJSON, body, "", "    ")
 
 	return string(prettyJSON.Bytes())
 }
@@ -214,15 +213,15 @@ func getCaddyRoute(config map[string]interface{}, hostname string) string {
 	return ""
 }
 
-func addRoute(reverseConfig reverseConfig, caddyHost string) {
+func addRoute(reverseConfig reverseConfig, caddyHost string, server string) {
 	resp := httpRequest("GET", "http://"+caddyHost+":2019/id/"+reverseConfig.Url, bytes.Buffer{})
 
 	// check whether object with id already exists, if true abort
 	if strings.Contains(resp, "dnsError") {
 		log.Println("Host unavailable")
-	} else if strings.Contains(resp, `"error":"unknown object ID`) {
+	} else if strings.Contains(resp, `"error": "unknown object ID`) {
 		tpl := createProxyTemplate(reverseConfig)
-		httpRequest("PUT", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/routes/0/", tpl)
+		httpRequest("PUT", "http://"+caddyHost+":2019/config/apps/http/servers/"+server+"/routes/0/", tpl)
 		log.Println("Added route successfully.")
 	} else {
 		log.Println("Route already exists.")
@@ -256,7 +255,7 @@ func addRedir(redirConfig redirConfig, caddyHost string) {
 }
 
 func main() {
-	var caddyHost, forward, extern string
+	var caddyHost, forward, extern, caddyServer string
 	var redir redirConfig
 	var update int
 	app := &cli.App{
@@ -291,16 +290,25 @@ func main() {
 						Value:       0,
 						Destination: &update,
 					},
+                                        &cli.StringFlag{
+                                                Name:        "server",
+                                                Aliases:     []string{"srv"},
+                                                Value:       "srv0",
+                                                Usage:       "provide the server name used in the caddy configuration",
+						EnvVars:     []string{"PODMAN_CADDY_SERVER"},
+                                                DefaultText: "srv0",
+                                                Destination: &caddyServer,
+                                        },
 				},
 				Action: func(c *cli.Context) error {
 					reverseConfig := checkFlags(forward)
-					addRoute(reverseConfig, caddyHost)
+					addRoute(reverseConfig, caddyHost, caddyServer)
 
 					// retries route creation every n minutes
 					if update != 0 {
 						for {
 							time.Sleep(time.Duration(update) * time.Minute)
-							addRoute(reverseConfig, caddyHost)
+							addRoute(reverseConfig, caddyHost, caddyServer)
 						}
 					}
 					return nil
