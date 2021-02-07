@@ -370,7 +370,7 @@ func main() {
 				},
 				Action: func(c *cli.Context) error {
 					// get current caddy routes
-					fmt.Println(httpRequest("GET", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/", bytes.Buffer{}))
+					fmt.Println(httpRequest("GET", "http://"+caddyHost+":2019/config/apps/http/servers/", bytes.Buffer{}))
 					return nil
 				},
 			},
