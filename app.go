@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -123,25 +122,24 @@ func httpRequest(method string, url string, buffer bytes.Buffer) string {
 	client := &http.Client{}
 
 	req, err := http.NewRequest(method, url, &buffer)
-	check(err)
 	req.Header.Set("Content-Type", "application/json")
+	check(err)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		if strings.Contains(err.Error(), "no such host") {
-			log.Println("unable to complete DNS request for provided caddy host.")
-			return "dnsError"
-		} else {
-			panic(err)
-		}
+            log.Println("Network or Caddy host is unreachable.")
+            return "networkError"
 	}
 
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+        body, err := ioutil.ReadAll(resp.Body)
 	check(err)
 
-	return string(body)
+        var prettyJSON bytes.Buffer
+        _ = json.Indent(&prettyJSON, body, "", "    ")
+
+	return string(prettyJSON.Bytes())
 }
 
 // convert byte to json
@@ -150,22 +148,6 @@ func readJsonMap(buffer []byte) map[string]interface{} {
 	check(json.Unmarshal(buffer, &result))
 
 	return result
-}
-
-// get stdin config for annotations & bundle path
-func getStdin() map[string]interface{} {
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
-	check(scanner.Err())
-
-	return readJsonMap(scanner.Bytes())
-}
-
-// get annotation from stdin and split it
-func getStdinConfig(stdin map[string]interface{}) reverseConfig {
-	annotations := strings.Split(stdin["annotations"].(map[string]interface{})["de.gaengeviertel.reverse-proxy"].(string), ":")
-
-	return createReverseConfig(annotations)
 }
 
 // split manual input from flag
@@ -212,11 +194,7 @@ func createRedirTemplate(config redirConfig) bytes.Buffer {
 
 // checks whether forward flag was used for providing manual config data
 func checkFlags(forward string) reverseConfig {
-	if forward == "" {
-		return getStdinConfig(getStdin())
-	} else {
-		return getManualConfig(forward)
-	}
+	return getManualConfig(forward)
 }
 
 // returns number of current containers route (filtert based on hostname)
@@ -231,17 +209,15 @@ func getCaddyRoute(config map[string]interface{}, hostname string) string {
 	return ""
 }
 
-func addRoute(reverseConfig reverseConfig, caddyHost string) {
+func addRoute(reverseConfig reverseConfig, caddyHost string, server string) {
 	resp := httpRequest("GET", "http://"+caddyHost+":2019/id/"+reverseConfig.Url, bytes.Buffer{})
 
 	// check whether object with id already exists, if true abort
-	if strings.Contains(resp, "dnsError") {
-		log.Println("Host unavailable")
-	} else if strings.Contains(resp, `"error":"unknown object ID`) {
+	if strings.Contains(resp, `"error": "unknown object ID`) {
 		tpl := createProxyTemplate(reverseConfig)
-		httpRequest("PUT", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/routes/0/", tpl)
+		httpRequest("PUT", "http://"+caddyHost+":2019/config/apps/http/servers/"+server+"/routes/0/", tpl)
 		log.Println("Added route successfully.")
-	} else {
+	} else if !strings.Contains(resp, "networkError"){
 		log.Println("Route already exists.")
 	}
 }
@@ -262,18 +238,16 @@ func addRedir(redirConfig redirConfig, caddyHost string) {
 	resp := httpRequest("GET", "http://"+caddyHost+":2019/id/"+redirConfig.Origin, bytes.Buffer{})
 
 	// check whether object with id already exists, if true abort
-	if strings.Contains(resp, "dnsError") {
-		log.Println("Host unavailable")
-	} else if strings.Contains(resp, `"error":"unknown object ID`) {
+	if strings.Contains(resp, `"error":"unknown object ID`) {
 		httpRequest("PUT", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/routes/0/", createRedirTemplate(redirConfig))
 		log.Println("Added route successfully.")
-	} else {
+	} else if !strings.Contains(resp, "networkError") {
 		log.Println("Route already exists.")
 	}
 }
 
 func main() {
-	var caddyHost, forward, extern string
+	var caddyHost, forward, extern, caddyServer string
 	var redir redirConfig
 	var update int
 	app := &cli.App{
@@ -308,16 +282,25 @@ func main() {
 						Value:       0,
 						Destination: &update,
 					},
+                                        &cli.StringFlag{
+                                                Name:        "server",
+                                                Aliases:     []string{"srv"},
+                                                Value:       "srv0",
+                                                Usage:       "provide the server name used in the caddy configuration",
+						EnvVars:     []string{"PODMAN_CADDY_SERVER"},
+                                                DefaultText: "srv0",
+                                                Destination: &caddyServer,
+                                        },
 				},
 				Action: func(c *cli.Context) error {
 					reverseConfig := checkFlags(forward)
-					addRoute(reverseConfig, caddyHost)
+					addRoute(reverseConfig, caddyHost, caddyServer)
 
 					// retries route creation every n minutes
 					if update != 0 {
 						for {
 							time.Sleep(time.Duration(update) * time.Minute)
-							addRoute(reverseConfig, caddyHost)
+							addRoute(reverseConfig, caddyHost, caddyServer)
 						}
 					}
 					return nil
@@ -379,7 +362,7 @@ func main() {
 				},
 				Action: func(c *cli.Context) error {
 					// get current caddy routes
-					fmt.Println(httpRequest("GET", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/", bytes.Buffer{}))
+					fmt.Println(httpRequest("GET", "http://"+caddyHost+":2019/config/apps/http/servers/", bytes.Buffer{}))
 					return nil
 				},
 			},
