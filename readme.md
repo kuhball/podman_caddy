@@ -1,5 +1,5 @@
 # podman caddy
-This tool creates reverse-proxy entries in [caddy](https://caddyserver.com/). This tool is running within an seperate container in every pod for announcing a caddy route.  
+This tool creates reverse-proxy entries in [caddy](https://caddyserver.com/). It's running within an seperate container in every pod for announcing the needed caddy route.  
 
 ## install
 
@@ -42,6 +42,7 @@ OPTIONS:
    --caddyHost value, --ca value  Provide the caddy hostname or IP manually (default: caddy) [$PODMAN_CADDY_HOST]
    --forward value, --fw value    Provide route details in the format PUBLIC_NAME:INTERN_NAME:INTERN_PORT [$PODMAN_CADDY_FORWARD]
    --update value, --up value     retries to add the route every n mins in case of unavailable caddy server (default: 0)
+   --server value, --srv value    provide the server name used in the caddy configuration (default: srv0) [$PODMAN_CADDY_SERVER]
    --help, -h                     show help (default: false)
 ```
 
@@ -56,7 +57,7 @@ podman build --rm -t podman_caddy:latest .
 ### caddy container
 
 ```bash
-podman run --rm -it -p 80:80 -p 443:443 -v caddy_config:/config --name caddy --hostname caddy --network dns_test docker.io/caddy/caddy caddy run --config /config/config.json
+podman run --rm -it -p 80:80 -p 443:443 -v caddy_config:/config --name caddy --hostname caddy docker.io/caddy/caddy caddy run --config /config/config.json
 ```
 
 caddy config file:
