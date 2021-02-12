@@ -127,12 +127,8 @@ func httpRequest(method string, url string, buffer bytes.Buffer) string {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		if strings.Contains(err.Error(), "no such host") {
-			log.Println("unable to complete DNS request for provided caddy host.")
-			return "dnsError"
-		} else {
-			panic(err)
-		}
+            log.Println("Network or Caddy host is unreachable.")
+            return "networkError"
 	}
 
 	defer resp.Body.Close()
@@ -217,13 +213,11 @@ func addRoute(reverseConfig reverseConfig, caddyHost string, server string) {
 	resp := httpRequest("GET", "http://"+caddyHost+":2019/id/"+reverseConfig.Url, bytes.Buffer{})
 
 	// check whether object with id already exists, if true abort
-	if strings.Contains(resp, "dnsError") {
-		log.Println("Host unavailable")
-	} else if strings.Contains(resp, `"error": "unknown object ID`) {
+	if strings.Contains(resp, `"error": "unknown object ID`) {
 		tpl := createProxyTemplate(reverseConfig)
 		httpRequest("PUT", "http://"+caddyHost+":2019/config/apps/http/servers/"+server+"/routes/0/", tpl)
 		log.Println("Added route successfully.")
-	} else {
+	} else if !strings.Contains(resp, "networkError"){
 		log.Println("Route already exists.")
 	}
 }
@@ -244,12 +238,10 @@ func addRedir(redirConfig redirConfig, caddyHost string) {
 	resp := httpRequest("GET", "http://"+caddyHost+":2019/id/"+redirConfig.Origin, bytes.Buffer{})
 
 	// check whether object with id already exists, if true abort
-	if strings.Contains(resp, "dnsError") {
-		log.Println("Host unavailable")
-	} else if strings.Contains(resp, `"error":"unknown object ID`) {
+	if strings.Contains(resp, `"error":"unknown object ID`) {
 		httpRequest("PUT", "http://"+caddyHost+":2019/config/apps/http/servers/srv0/routes/0/", createRedirTemplate(redirConfig))
 		log.Println("Added route successfully.")
-	} else {
+	} else if !strings.Contains(resp, "networkError") {
 		log.Println("Route already exists.")
 	}
 }
