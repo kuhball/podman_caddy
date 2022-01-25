@@ -5,9 +5,9 @@ COPY ./ /go/src/github.com/scouball/podman_caddy
 WORKDIR /go/src/github.com/scouball/podman_caddy
 
 RUN apk add git
-RUN go get gopkg.in/urfave/cli.v2
+RUN GO111MODULE=on go get github.com/urfave/cli/v2
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -ldflags="-w -s" -o $GOPATH/bin/podman_caddy
+RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -ldflags="-w -s" -o $GOPATH/bin/podman_caddy
 
 
 # final stage
