@@ -22,7 +22,7 @@ func check(e error) {
 }
 
 type reverseConfig struct {
-	Dns, Port, Url string
+	Dns, Port, Url, Private string
 }
 
 type redirConfig struct {
@@ -35,6 +35,7 @@ const caddyAddTemplate = `{
     {
       "handler": "subroute",
       "routes": [
+        {{ .Private }}
         {
           "handle": [
             {
@@ -151,14 +152,14 @@ func readJsonMap(buffer []byte) map[string]interface{} {
 }
 
 // split manual input from flag
-func getManualConfig(input string) reverseConfig {
+func getManualConfig(input string, private bool) reverseConfig {
 	config := strings.Split(input, ":")
 
-	return createReverseConfig(config)
+	return createReverseConfig(config, private)
 }
 
 // assembles the reverseConfig struct from provided data (manual or annotation)
-func createReverseConfig(input []string) reverseConfig {
+func createReverseConfig(input []string, private bool) reverseConfig {
 	if len(input) == 0 {
 		os.Exit(0)
 	} else if len(input) != 3 {
@@ -170,6 +171,36 @@ func createReverseConfig(input []string) reverseConfig {
 	reverseConfig.Url = input[0]
 	reverseConfig.Dns = input[1]
 	reverseConfig.Port = input[2]
+	if private {
+	    reverseConfig.Private = `{
+                      "handle": [
+                        {
+                          "abort": true,
+                          "handler": "static_response"
+                        }
+                      ],
+                      "match": [
+                        {
+                          "not": [
+                            {
+                              "remote_ip": {
+                                "ranges": [
+                                  "192.168.0.0/16",
+                                  "172.16.0.0/12",
+                                  "10.0.0.0/8",
+                                  "127.0.0.1/8",
+                                  "fd00::/8",
+                                  "::1"
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },`
+     } else {
+	     reverseConfig.Private = ""
+     }
 
 	return reverseConfig
 }
@@ -193,8 +224,8 @@ func createRedirTemplate(config redirConfig) bytes.Buffer {
 }
 
 // checks whether forward flag was used for providing manual config data
-func checkFlags(forward string) reverseConfig {
-	return getManualConfig(forward)
+func checkFlags(forward string, private bool) reverseConfig {
+	return getManualConfig(forward, private)
 }
 
 // returns number of current containers route (filtert based on hostname)
@@ -250,6 +281,7 @@ func main() {
 	var caddyHost, forward, extern, caddyServer string
 	var redir redirConfig
 	var update int
+	var private bool
 	app := &cli.App{
 		Name:  "podman_caddy",
 		Usage: "create caddy routes from a podman context",
@@ -282,18 +314,25 @@ func main() {
 						Value:       0,
 						Destination: &update,
 					},
-                                        &cli.StringFlag{
-                                                Name:        "server",
-                                                Aliases:     []string{"srv"},
-                                                Value:       "srv0",
-                                                Usage:       "provide the server name used in the caddy configuration",
+					&cli.StringFlag{
+					        Name:        "server",
+						Aliases:     []string{"srv"},
+						Value:       "srv0",
+						Usage:       "provide the server name used in the caddy configuration",
 						EnvVars:     []string{"PODMAN_CADDY_SERVER"},
-                                                DefaultText: "srv0",
-                                                Destination: &caddyServer,
-                                        },
+						DefaultText: "srv0",
+						Destination: &caddyServer,
+					},
+					&cli.BoolFlag{
+						Name: 	     "private",
+						Aliases:     []string{"p"},
+						Value:       false,
+						Usage:       "make this route only reachable via privat ip's",
+						Destination: &private,
+					},
 				},
 				Action: func(c *cli.Context) error {
-					reverseConfig := checkFlags(forward)
+					reverseConfig := checkFlags(forward, private)
 					addRoute(reverseConfig, caddyHost, caddyServer)
 
 					// retries route creation every n minutes
@@ -338,7 +377,7 @@ func main() {
 					if extern != "" {
 						delRoute(caddyHost, extern)
 					} else {
-						reverseConfig := checkFlags(forward)
+						reverseConfig := checkFlags(forward, false)
 						delRoute(caddyHost, reverseConfig.Url)
 					}
 
