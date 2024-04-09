@@ -1,14 +1,14 @@
 # podman caddy
-This tool creates reverse-proxy entries in [caddy](https://caddyserver.com/). 
+This tool creates reverse-proxy entries in [caddy](https://caddyserver.com/).
 It's running within an seperate container in every pod for announcing the needed caddy route.
 
-Main reason to use this is the ability to create reverse-proxy entries without having to enable the docker api for automatic creation and sacrificing security. 
+Main reason to use this is the ability to create reverse-proxy entries without having to enable the docker api for automatic creation and sacrificing security.
 
 ## install
 
 ### tool
 
-Within the provided Dockerfile a build stage is used for building the image. Afterwords it runs in a scratch container to stay as small as possible. 
+Within the provided Dockerfile a build stage is used for building the image. Afterwords it runs in a scratch container to stay as small as possible.
 
 Following arguments can be provided:
 
@@ -16,17 +16,17 @@ Following arguments can be provided:
 # podman run --rm podman_caddy --help
   NAME:
      podman_caddy - create caddy routes from a podman context
-  
+
   USAGE:
      podman_caddy [global options] command [command options] [arguments...]
-  
+
   COMMANDS:
      add, a      add a route to caddy
      remove, rm  delete a route from caddy
      ls, ls      displays current caddy config
      redir, mv   creates 301 and redirects to provided page
      help, h     Shows a list of commands or help for one command
-  
+
   GLOBAL OPTIONS:
      --help, -h  show help (default: false)
 ```
@@ -94,9 +94,9 @@ caddy config file:
 }
 ```
 
-The config file is needed for altering the admin api to listen to requests outside of localhost and make the config inpersistent. Otherwise the container will keep all the routes he had when stopping. 
+The config file is needed for altering the admin api to listen to requests outside of localhost and make the config inpersistent. Otherwise the container will keep all the routes he had when stopping.
 
-It's important to make sure the first container started in the environment is the caddy container. This can be done by using systemd. 
+It's important to make sure the first container started in the environment is the caddy container. This can be done by using systemd.
 
 ## test
 

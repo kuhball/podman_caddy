@@ -383,8 +383,8 @@ func main() {
 				},
 			},
 			{
-				Name:    "ls",
-				Usage:   "displays current caddy config",
+				Name:  "ls",
+				Usage: "displays current caddy config",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:        "caddyHost",
