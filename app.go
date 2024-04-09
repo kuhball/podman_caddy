@@ -128,17 +128,17 @@ func httpRequest(method string, url string, buffer bytes.Buffer) string {
 
 	resp, err := client.Do(req)
 	if err != nil {
-            log.Println("Network or Caddy host is unreachable.")
-            return "networkError"
+		log.Println("Network or Caddy host is unreachable.")
+		return "networkError"
 	}
 
 	defer resp.Body.Close()
 
-        body, err := ioutil.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
 	check(err)
 
-        var prettyJSON bytes.Buffer
-        _ = json.Indent(&prettyJSON, body, "", "    ")
+	var prettyJSON bytes.Buffer
+	_ = json.Indent(&prettyJSON, body, "", "    ")
 
 	return string(prettyJSON.Bytes())
 }
@@ -172,7 +172,7 @@ func createReverseConfig(input []string, private bool) reverseConfig {
 	reverseConfig.Dns = input[1]
 	reverseConfig.Port = input[2]
 	if private {
-	    reverseConfig.Private = `{
+		reverseConfig.Private = `{
                       "handle": [
                         {
                           "abort": true,
@@ -198,14 +198,13 @@ func createReverseConfig(input []string, private bool) reverseConfig {
                         }
                       ]
                     },`
-     } else {
-	     reverseConfig.Private = ""
-     }
+	} else {
+		reverseConfig.Private = ""
+	}
 
 	return reverseConfig
 }
 
-// adds route for new container based on the annotation 'reverse-proxy'
 func createProxyTemplate(config reverseConfig) bytes.Buffer {
 	t := template.Must(template.New("caddy-reverse").Parse(caddyAddTemplate))
 	var tpl bytes.Buffer
@@ -214,7 +213,6 @@ func createProxyTemplate(config reverseConfig) bytes.Buffer {
 	return tpl
 }
 
-// adds route for new container based on the annotation 'reverse-proxy'
 func createRedirTemplate(config redirConfig) bytes.Buffer {
 	t := template.Must(template.New("caddy-reverse").Parse(CaddyRedirTemplate))
 	var tpl bytes.Buffer
@@ -248,7 +246,7 @@ func addRoute(reverseConfig reverseConfig, caddyHost string, server string) {
 		tpl := createProxyTemplate(reverseConfig)
 		httpRequest("PUT", "http://"+caddyHost+":2019/config/apps/http/servers/"+server+"/routes/0/", tpl)
 		log.Println("Added route successfully.")
-	} else if !strings.Contains(resp, "networkError"){
+	} else if !strings.Contains(resp, "networkError") {
 		log.Println("Route already exists.")
 	}
 }
@@ -315,7 +313,7 @@ func main() {
 						Destination: &update,
 					},
 					&cli.StringFlag{
-					        Name:        "server",
+						Name:        "server",
 						Aliases:     []string{"srv"},
 						Value:       "srv0",
 						Usage:       "provide the server name used in the caddy configuration",
@@ -324,7 +322,7 @@ func main() {
 						Destination: &caddyServer,
 					},
 					&cli.BoolFlag{
-						Name: 	     "private",
+						Name:        "private",
 						Aliases:     []string{"p"},
 						Value:       false,
 						Usage:       "make this route only reachable via privat ip's",
@@ -385,9 +383,8 @@ func main() {
 				},
 			},
 			{
-				Name:    "ls",
-				Aliases: []string{"ls"},
-				Usage:   "displays current caddy config",
+				Name:  "ls",
+				Usage: "displays current caddy config",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:        "caddyHost",
