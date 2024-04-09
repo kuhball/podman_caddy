@@ -1,5 +1,8 @@
 # podman caddy
-This tool creates reverse-proxy entries in [caddy](https://caddyserver.com/). It's running within an seperate container in every pod for announcing the needed caddy route.  
+This tool creates reverse-proxy entries in [caddy](https://caddyserver.com/). 
+It's running within an seperate container in every pod for announcing the needed caddy route.
+
+Main reason to use this is the ability to create reverse-proxy entries without having to enable the docker api for automatic creation and sacrificing security. 
 
 ## install
 
@@ -66,6 +69,9 @@ caddy config file:
 {
   "admin": {
     "listen": "0.0.0.0:2019",
+    "origins": [
+      "caddy:2019"
+    ],
     "config": {
       "persist": false
     }
@@ -78,7 +84,9 @@ caddy config file:
             ":80",
             ":443"
           ],
-          "routes": [{}]
+          "routes": [
+            {}
+          ]
         }
       }
     }
@@ -96,3 +104,8 @@ It's important to make sure the first container started in the environment is th
 podman run --rm podman_caddy add --fw test.local:dieter:80
 podman run -it --rm --name dieter --hostname dieter --network dns_test alpine_nginx
 ```
+
+## todo
+
+- [ ] delete all routes command
+- [ ] delete route via context on graceful shutdown when `--update` has been used
